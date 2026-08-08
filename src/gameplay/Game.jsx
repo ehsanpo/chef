@@ -223,9 +223,19 @@ export default function Game(){
         <div className="pan-row">
           {Array.from({length:SLOTS}).map((_,i)=>{
             const left = `${SLOT_X[i]*100}%`
+            const isActive = i === playerSlot
             return (
-              <div key={i} className={`slot ${i===playerSlot? 'active':''}`} style={{left}} onClick={()=>onClickMove(i)}>
-                <img src={Spr.player} alt="player" className="player-sprite" />
+              <div 
+                key={i} 
+                className={`slot ${isActive ? 'active' : 'inactive'}`} 
+                style={{left}} 
+                onClick={()=>onClickMove(i)}
+              >
+                <div 
+                  className={`player-sprite frame-${i}`}
+                  style={{ backgroundImage: `url(${Spr.chefSheet})` }}
+                  aria-label={`chef-frame-${i}`}
+                />
               </div>
             )
           })}
