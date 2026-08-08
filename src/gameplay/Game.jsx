@@ -22,12 +22,17 @@ export default function Game(){
   const lastTS = useRef(0)
   const spawnTimer = useRef(0)
   const spawnInterval = useRef(900)
+  const gameOverRef = useRef(false)
   const playerSlotRef = useRef(1)  // track player slot for collision detection
 
   // sync playerSlot state to ref for collision detection
   useEffect(()=>{
     playerSlotRef.current = playerSlot
   },[playerSlot])
+
+  useEffect(()=>{
+    gameOverRef.current = gameOver
+  },[gameOver])
 
   useEffect(()=>{
     function onKey(e){
@@ -48,6 +53,7 @@ export default function Game(){
   function resetGame(){
     itemsRef.current = []
     setScore(0); setMisses(0); setGameOver(false); setSpeedMult(1); setCatPresent(false)
+    gameOverRef.current = false
   }
 
   function move(dir){
@@ -57,7 +63,16 @@ export default function Game(){
   function spawnRandom(){
     const types = ['sausage','fish','egg']
     const type = Math.random() < 0.03 ? 'mouse' : randChoice(types)
-    const slot = Math.floor(Math.random()*SLOTS)
+    
+    // find available slot (no active food in it)
+    let slot = -1
+    for(let attempt = 0; attempt < SLOTS; attempt++){
+      const testSlot = Math.floor(Math.random()*SLOTS)
+      const slotOccupied = itemsRef.current.some(it => it.slot === testSlot)
+      if(!slotOccupied){ slot = testSlot; break }
+    }
+    if(slot === -1) return  // no free slot, skip spawn
+    
     const now = performance.now()
     const item = {
       id: Math.random().toString(36).slice(2),
@@ -65,6 +80,7 @@ export default function Game(){
       slot,
       y: 10,  // spawn at top of visible screen
       vy: 0.5 + Math.random()*0.8,
+      flipsLeft: type === 'mouse' ? 0 : 3,
       hookedUntil: 0,
       freezeUntil: now + 1000  // 1 second delay before falling
     }
@@ -79,26 +95,29 @@ export default function Game(){
       lastTS.current = ts
 
       // if game is over, stop updating
-      if(gameOver) return
+      if(gameOverRef.current) return
 
       // speed increases slightly over time
       setSpeedMult(s => Math.min(3, s + dt*0.00002))
 
       // spawn control
       spawnTimer.current += dt
-      const adjInterval = Math.max(3500, spawnInterval.current - (score/50))  // 10x slower: ~9 sec base
+      const adjInterval = Math.max(5500, spawnInterval.current - (score/100))  // longer spawn interval: ~5.5 sec base
       if(spawnTimer.current > adjInterval){ spawnTimer.current = 0; spawnRandom() }
 
       updateItems(dt/16, playerSlotRef.current)
 
       setTick(t => t + 1)
-      if(!gameOver) rafRef.current = requestAnimationFrame(frame)
+      if(!gameOverRef.current) rafRef.current = requestAnimationFrame(frame)
     }
     rafRef.current = requestAnimationFrame(frame)
   }
 
   function updateItems(step, currentPlayerSlot){
-    const gravity = 0.0875 * speedMult  // halved again: 0.175 → 0.0875
+    // stop all updates if game is over
+    if(gameOverRef.current) return
+    
+    const gravity = 0.04 * speedMult  // reduced further for slower drops
     const now = performance.now()
     const container = containerRef.current
     if(!container) return
@@ -130,9 +149,19 @@ export default function Game(){
             setScore(s => s + 50)
             setCatPresent(false)
           } else {
+            it.flipsLeft -= 1
+            if(it.flipsLeft <= 0){
+              setScore(s => s + 30)
+              // item disappears after the third catch
+              continue
+            }
             setScore(s => s + 10)
           }
-          it.vy = -8 - Math.random()*2
+          it.vy = -3 - Math.random()*1  // reduced bounce: -8 to -3
+          // freeze briefly after catch so it stays visible before falling again
+          it.freezeUntil = now + 600
+          // cap bounce height so food doesn't go off-screen
+          if(it.y < 10) it.y = 10
           // cat interaction: when cat present, small chance to hook item for a second
           if(catPresent && Math.random() < 0.25){ it.hookedUntil = now + 900 }
           next.push(it)
@@ -142,7 +171,7 @@ export default function Game(){
           if(it.y >= groundY){
             setMisses(m => {
               const nm = m + 1
-              if(nm >= 3){ setGameOver(true) }
+              if(nm >= 3){ setGameOver(true); gameOverRef.current = true }
               return nm
             })
             continue // drop item
@@ -180,7 +209,12 @@ export default function Game(){
           const left = `${SLOT_X[it.slot]*100}%`
           const sprite = it.type === 'sausage' ? Spr.sausage : it.type === 'fish' ? Spr.fish : it.type === 'egg' ? Spr.egg : Spr.mouse
           return (
-            <img key={it.id} src={sprite} alt={it.type} className="item" style={{left, transform:`translate(-50%, -50%)`, top: `${it.y}px`}} />
+            <div key={it.id} className="item-wrapper" style={{left, top: `${it.y}px`}}>
+              <img src={sprite} alt={it.type} className="item" />
+              {it.type !== 'mouse' && it.flipsLeft > 0 && (
+                <span className="item-count">{it.flipsLeft}</span>
+              )}
+            </div>
           )
         })}
 
