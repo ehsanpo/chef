@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v3.json",
+  "name": "Chef Game & Watch",
+  "outputfilename": "ChefGame",
+  "frontend:dir": "./frontend",
+  "info": {
+    "companyName": "Retro Arcade",
+    "productName": "Chef Game & Watch",
+    "productVersion": "1.0.0",
+    "copyright": "© 2026 Retro Arcade",
+    "comments": "Nintendo Game & Watch FP-24 Recreation"
+  }
+}

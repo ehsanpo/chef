@@ -1,0 +1,21 @@
+version: '3'
+
+vars:
+  APP_NAME: 'ChefGame'
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  build:
+    desc: Build standalone desktop executable (.exe)
+    cmds:
+      - cmd /c if exist frontend rmdir /s /q frontend
+      - cmd /c xcopy /E /I /Y ..\dist frontend
+      - go build -buildvcs=false -ldflags "-s -w" -o {{.APP_NAME}}.exe .
+
+  dev:
+    desc: Run application in development mode
+    cmds:
+      - go run -buildvcs=false .
