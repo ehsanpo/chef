@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as Spr from '../structure/sprites'
+import kitchenBg from '../../img/bg.png'
 
 const SLOTS = 4
 const SLOT_X = [0.12, 0.36, 0.60, 0.84] // as fraction of width
@@ -202,7 +203,7 @@ export default function Game(){
 
       <div className={`game-area ${gameOver? 'game-over' : ''}`} ref={containerRef}>
         {/* background / level */}
-        <div className="kitchen-bg" />
+        <div className="kitchen-bg" style={{ backgroundImage: `url(${kitchenBg})` }} />
 
         {/* items */}
         {itemsRef.current.map(it => {
