@@ -12,6 +12,7 @@ function randChoice(arr) { return arr[Math.floor(Math.random() * arr.length)] }
 export default function Game() {
   const containerRef = useRef(null)
   const itemsRef = useRef([])
+  const popupsRef = useRef([])
 
   // Screen State: 'MENU' | 'PLAYING'
   const [screen, setScreen] = useState('MENU')
@@ -30,12 +31,13 @@ export default function Game() {
   const [playerSlot, setPlayerSlot] = useState(1)
   const [score, setScore] = useState(0)
   const [misses, setMisses] = useState(0)
-  const [speedMult, setSpeedMult] = useState(1)
   const [catPresent, setCatPresent] = useState(false)
   const [gameOver, setGameOver] = useState(false)
 
-  // Floating Score Popups
-  const [popups, setPopups] = useState([])
+  // Active Powerup Indicators for HUD
+  const [has2X, setHas2X] = useState(false)
+  const [hasSlow, setHasSlow] = useState(false)
+  const [renderTick, setRenderTick] = useState(0)
 
   // Animation Loop Refs
   const rafRef = useRef(null)
@@ -44,6 +46,16 @@ export default function Game() {
   const gameOverRef = useRef(false)
   const playerSlotRef = useRef(1)
   const activeDiffRef = useRef(DIFFICULTIES.gameA)
+  const speedMultRef = useRef(1)
+
+  // Powerup & Milestone Timers
+  const multiplierUntilRef = useRef(0)
+  const slowUntilRef = useRef(0)
+  const milestonesRef = useRef({ 200: false, 500: false })
+
+  // Ref tracking to avoid useless React re-renders
+  const has2XRef = useRef(false)
+  const hasSlowRef = useRef(false)
 
   useEffect(() => {
     playerSlotRef.current = playerSlot
@@ -52,6 +64,14 @@ export default function Game() {
   useEffect(() => {
     gameOverRef.current = gameOver
   }, [gameOver])
+
+  // Cleanup loop on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      soundFx.stopBgMusic()
+    }
+  }, [])
 
   const toggleSound = () => {
     const isMuted = soundFx.toggleMute()
@@ -64,22 +84,20 @@ export default function Game() {
     setScreen('MENU')
   }
 
-  // Spawn floating score popup animation
+  // Optimized score popup spawner (no setTimeout closures, cleaned up in frame loop)
   function triggerScorePopup(text, slotIndex, yPos, isBonus = false) {
     const popupId = Math.random().toString(36).slice(2)
     const left = `${SLOT_X[slotIndex] * 100}%`
+    const now = performance.now()
     const newPopup = {
       id: popupId,
       text,
       left,
       top: `${yPos}px`,
-      isBonus
+      isBonus,
+      expiresAt: now + 1350
     }
-    setPopups(prev => [...prev.slice(-8), newPopup])
-
-    setTimeout(() => {
-      setPopups(prev => prev.filter(p => p.id !== popupId))
-    }, 1350)
+    popupsRef.current = [...popupsRef.current.slice(-6), newPopup]
   }
 
   const updateHighScoreIfNeeded = (newScore, diffKey) => {
@@ -98,6 +116,22 @@ export default function Game() {
     })
   }
 
+  // Check 200pt & 500pt Milestone Extra Lives
+  function checkMilestones(currentScore) {
+    if (currentScore >= 200 && !milestonesRef.current[200]) {
+      milestonesRef.current[200] = true
+      setMisses(0)
+      soundFx.playScoreBonus()
+      triggerScorePopup('1-UP! MISSES CLEARED!', 1, 140, true)
+    }
+    if (currentScore >= 500 && !milestonesRef.current[500]) {
+      milestonesRef.current[500] = true
+      setMisses(0)
+      soundFx.playScoreBonus()
+      triggerScorePopup('1-UP! MISSES CLEARED!', 2, 140, true)
+    }
+  }
+
   useEffect(() => {
     function onKey(e) {
       if (screen !== 'PLAYING') return
@@ -113,16 +147,24 @@ export default function Game() {
     const diff = DIFFICULTIES[selectedDiffKey] || DIFFICULTIES.gameA
     setDifficultyKey(selectedDiffKey)
     activeDiffRef.current = diff
+    speedMultRef.current = diff.baseSpeed
 
     itemsRef.current = []
-    setPopups([])
+    popupsRef.current = []
     setScore(0)
     setMisses(0)
     setGameOver(false)
-    setSpeedMult(diff.baseSpeed)
     setCatPresent(false)
     gameOverRef.current = false
     setPlayerSlot(1)
+
+    multiplierUntilRef.current = 0
+    slowUntilRef.current = 0
+    milestonesRef.current = { 200: false, 500: false }
+    has2XRef.current = false
+    hasSlowRef.current = false
+    setHas2X(false)
+    setHasSlow(false)
 
     setScreen('PLAYING')
     soundFx.playBgMusic()
@@ -131,14 +173,25 @@ export default function Game() {
 
   function restartGame() {
     const diff = DIFFICULTIES[difficultyKey] || DIFFICULTIES.gameA
+    activeDiffRef.current = diff
+    speedMultRef.current = diff.baseSpeed
+
     itemsRef.current = []
-    setPopups([])
+    popupsRef.current = []
     setScore(0)
     setMisses(0)
     setGameOver(false)
-    setSpeedMult(diff.baseSpeed)
     setCatPresent(false)
     gameOverRef.current = false
+    setPlayerSlot(1)
+
+    multiplierUntilRef.current = 0
+    slowUntilRef.current = 0
+    milestonesRef.current = { 200: false, 500: false }
+    has2XRef.current = false
+    hasSlowRef.current = false
+    setHas2X(false)
+    setHasSlow(false)
 
     soundFx.playBgMusic()
     startLoop()
@@ -149,8 +202,12 @@ export default function Game() {
   }
 
   function spawnRandom() {
-    const types = ['sausage', 'fish', 'egg']
-    const type = Math.random() < 0.03 ? 'mouse' : randChoice(types)
+    const r = Math.random()
+    let type = 'sausage'
+    if (r < 0.03) type = 'mouse'
+    else if (r < 0.055) type = 'golden'
+    else if (r < 0.085) type = 'coffee'
+    else type = randChoice(['sausage', 'fish', 'egg'])
 
     let slot = -1
     for (let attempt = 0; attempt < SLOTS; attempt++) {
@@ -161,15 +218,17 @@ export default function Game() {
     if (slot === -1) return
 
     const now = performance.now()
+    const isSpecial = type === 'mouse' || type === 'golden' || type === 'coffee'
     const item = {
       id: Math.random().toString(36).slice(2),
       type,
       slot,
       y: 10,
       vy: 0.5 + Math.random() * 0.8,
-      flipsLeft: type === 'mouse' ? 0 : 3,
+      flipsLeft: isSpecial ? 0 : 3,
       hookedUntil: 0,
-      freezeUntil: now + 900
+      freezeUntil: now + 900,
+      lastCaughtUntil: 0
     }
     itemsRef.current.push(item)
   }
@@ -185,8 +244,29 @@ export default function Game() {
 
       if (gameOverRef.current) return
 
-      setSpeedMult(s => Math.min(3.5, s + dt * 0.000025))
+      const now = performance.now()
+      const is2XActive = multiplierUntilRef.current > now
+      const isSlowActive = slowUntilRef.current > now
 
+      // ONLY trigger React state update when power-up status changes!
+      if (is2XActive !== has2XRef.current) {
+        has2XRef.current = is2XActive
+        setHas2X(is2XActive)
+      }
+      if (isSlowActive !== hasSlowRef.current) {
+        hasSlowRef.current = isSlowActive
+        setHasSlow(isSlowActive)
+      }
+
+      // Smoothly update speedMultRef without triggering 60 FPS React re-renders
+      speedMultRef.current = Math.min(3.5, speedMultRef.current + dt * 0.000025)
+
+      // Clean up expired popups inside the loop (zero garbage accumulation)
+      if (popupsRef.current.length > 0) {
+        popupsRef.current = popupsRef.current.filter(p => p.expiresAt > now)
+      }
+
+      // Controlled spawn timing
       spawnTimer.current += dt
       const diffConfig = activeDiffRef.current
       const baseInterval = diffConfig.spawnInterval
@@ -197,7 +277,10 @@ export default function Game() {
         spawnRandom()
       }
 
-      updateItems(dt / 16, playerSlotRef.current)
+      updateItems(dt / 16, playerSlotRef.current, is2XActive, isSlowActive)
+
+      // Light render tick to render positions smoothly at 60 FPS
+      setRenderTick(t => (t + 1) % 10000)
 
       if (!gameOverRef.current) {
         rafRef.current = requestAnimationFrame(frame)
@@ -207,10 +290,12 @@ export default function Game() {
     rafRef.current = requestAnimationFrame(frame)
   }
 
-  function updateItems(step, currentPlayerSlot) {
+  function updateItems(step, currentPlayerSlot, is2XActive, isSlowActive) {
     if (gameOverRef.current) return
 
-    const gravity = 0.04 * speedMult
+    const speed = speedMultRef.current
+    const gravityScale = isSlowActive ? 0.45 : 1.0
+    const gravity = 0.04 * speed * gravityScale
     const now = performance.now()
     const container = containerRef.current
     if (!container) return
@@ -219,7 +304,7 @@ export default function Game() {
     const groundY = h - 10
 
     const catChance = activeDiffRef.current.catChance
-    if (!catPresent && Math.random() < catChance * speedMult) setCatPresent(true)
+    if (!catPresent && Math.random() < catChance * speed) setCatPresent(true)
     if (catPresent && Math.random() < 0.0008) setCatPresent(false)
 
     const next = []
@@ -233,37 +318,56 @@ export default function Game() {
 
       if (it.y >= panY) {
         if (it.slot === currentPlayerSlot) {
-          // Caught by pan (guaranteed single hit per bounce)
+          // Single-hit catch guarantee
           it.lastCaughtUntil = now + 650
           it.y = panY - 26
 
-          let pts = 10
+          let basePts = 10
+
           if (it.type === 'mouse') {
-            pts = 50
+            basePts = 50
             soundFx.playMouseBonus()
-            triggerScorePopup('+50 BONUS!', it.slot, panY - 20, true)
+            const pts = basePts * (is2XActive ? 2 : 1)
+            triggerScorePopup(`+${pts} MOUSE!`, it.slot, panY - 20, true)
             setCatPresent(false)
+          } else if (it.type === 'golden') {
+            basePts = 100
+            multiplierUntilRef.current = now + 6000
+            soundFx.playMouseBonus()
+            const pts = basePts * (is2XActive ? 2 : 1)
+            triggerScorePopup(`+${pts} 🌟 GOLDEN 2X!`, it.slot, panY - 20, true)
+          } else if (it.type === 'coffee') {
+            basePts = 20
+            slowUntilRef.current = now + 5000
+            soundFx.playScoreBonus()
+            const pts = basePts * (is2XActive ? 2 : 1)
+            triggerScorePopup(`+${pts} ☕ CHEF FOCUS!`, it.slot, panY - 20, true)
           } else {
             it.flipsLeft -= 1
             if (it.flipsLeft <= 0) {
-              pts = 30
+              basePts = 30
               soundFx.playScoreBonus()
-              triggerScorePopup('+30!', it.slot, panY - 20, true)
+              const pts = basePts * (is2XActive ? 2 : 1)
+              triggerScorePopup(`+${pts}!`, it.slot, panY - 20, true)
               setScore(s => {
                 const ns = s + pts
                 updateHighScoreIfNeeded(ns, difficultyKey)
+                checkMilestones(ns)
                 return ns
               })
               continue
             } else {
               soundFx.playCatch()
-              triggerScorePopup('+10', it.slot, panY - 20, false)
+              const pts = basePts * (is2XActive ? 2 : 1)
+              triggerScorePopup(`+${pts}`, it.slot, panY - 20, false)
             }
           }
 
+          const pts = basePts * (is2XActive ? 2 : 1)
           setScore(s => {
             const ns = s + pts
             updateHighScoreIfNeeded(ns, difficultyKey)
+            checkMilestones(ns)
             return ns
           })
 
@@ -277,13 +381,11 @@ export default function Game() {
           next.push(it)
           continue
         } else {
-          // Missed item (hit floor)
+          // Missed item
           if (it.y >= groundY) {
-            if (it.type === 'mouse') {
-              // Mouse escaped: No life penalty!
+            if (it.type === 'mouse' || it.type === 'golden' || it.type === 'coffee') {
               triggerScorePopup('ESCAPED!', it.slot, groundY - 30, false)
             } else {
-              // Food dropped: Penalty (loss of life)
               soundFx.playMiss()
               triggerScorePopup('MISS!', it.slot, groundY - 30, true)
 
@@ -312,6 +414,16 @@ export default function Game() {
     if (screen === 'PLAYING') setPlayerSlot(i)
   }
 
+  function getItemSprite(type) {
+    if (type === 'sausage') return Spr.sausage
+    if (type === 'fish') return Spr.fish
+    if (type === 'egg') return Spr.egg
+    if (type === 'mouse') return Spr.mouse
+    if (type === 'golden') return Spr.golden
+    if (type === 'coffee') return Spr.coffee
+    return Spr.sausage
+  }
+
   return (
     <div className="game-wrap">
       {screen === 'MENU' ? (
@@ -323,7 +435,7 @@ export default function Game() {
         <>
           <div className="hud">
             <div><strong>MODE:</strong> {DIFFICULTIES[difficultyKey]?.name}</div>
-            <div><strong>SCORE:</strong> {score}</div>
+            <div><strong>SCORE:</strong> {score} {has2X && <span className="badge-2x">🌟 2X</span>} {hasSlow && <span className="badge-slow">☕ SLOW</span>}</div>
             <div><strong>BEST:</strong> {highScores[difficultyKey] || 0}</div>
             <div><strong>MISSES:</strong> {misses} / 3</div>
             <div>
@@ -337,7 +449,7 @@ export default function Game() {
             <div className="kitchen-bg" style={{ backgroundImage: `url(${kitchenBg})` }} />
 
             {/* Floating Score gained popups */}
-            {popups.map(p => (
+            {popupsRef.current.map(p => (
               <div 
                 key={p.id} 
                 className={`floating-score ${p.isBonus ? 'bonus' : ''}`}
@@ -350,11 +462,12 @@ export default function Game() {
             {/* Falling items */}
             {itemsRef.current.map(it => {
               const left = `${SLOT_X[it.slot] * 100}%`
-              const sprite = it.type === 'sausage' ? Spr.sausage : it.type === 'fish' ? Spr.fish : it.type === 'egg' ? Spr.egg : Spr.mouse
+              const sprite = getItemSprite(it.type)
+              const isSpecial = it.type === 'mouse' || it.type === 'golden' || it.type === 'coffee'
               return (
                 <div key={it.id} className="item-wrapper" style={{ left, top: `${it.y}px` }}>
                   <img src={sprite} alt={it.type} className="item" />
-                  {it.type !== 'mouse' && it.flipsLeft > 0 && (
+                  {!isSpecial && it.flipsLeft > 0 && (
                     <span className="item-count">{it.flipsLeft}</span>
                   )}
                 </div>
