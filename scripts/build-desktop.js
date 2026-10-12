@@ -16,7 +16,7 @@ fs.cpSync(srcDir, dstDir, { recursive: true });
 
 console.log('🔨 [3/3] Compiling standalone Desktop EXE with Go/Wails...');
 const desktopDir = path.join(__dirname, '..', 'desktop');
-execSync('go build -buildvcs=false -ldflags "-s -w" -o ChefGame.exe .', {
+execSync('go build -buildvcs=false -ldflags "-H windowsgui -s -w" -o ChefGame.exe .', {
   cwd: desktopDir,
   stdio: 'inherit'
 });

@@ -13,7 +13,7 @@ tasks:
     cmds:
       - cmd /c if exist frontend rmdir /s /q frontend
       - cmd /c xcopy /E /I /Y ..\dist frontend
-      - go build -buildvcs=false -ldflags "-s -w" -o {{.APP_NAME}}.exe .
+      - go build -buildvcs=false -ldflags "-H windowsgui -s -w" -o {{.APP_NAME}}.exe .
 
   dev:
     desc: Run application in development mode
